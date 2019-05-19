@@ -7,15 +7,37 @@ function setup_progress () {
   then
     echo "$( date ) : $1" >> "$setup_logfile"
   fi
-    echo $1
+  echo $1
 }
 
 if blkid -L backingfiles > /dev/null && blkid -L mutable > /dev/null
 then
-  # assume these were either created previously by the setup scripts,
-  # or manually by the user, and that they're big enough
-  setup_progress "using existing backingfiles and mutable partitions"
-  return &> /dev/null || exit 0
+  if blkid -s TYPE $(blkid -L backingfiles) | grep -q xfs
+  then
+    # assume these were either created previously by the setup scripts,
+    # or manually by the user, and that they're big enough
+    setup_progress "using existing backingfiles and mutable partitions"
+    return &> /dev/null || exit 0
+  fi
+
+  # backingfiles partition exists but is the wrong type, reformat it
+  setup_progress "converting existing backingfiles to xfs"
+  if ! hash mkfs.xfs
+  then
+    apt-get -y --force-yes install xfsprogs
+  fi
+  modprobe -r g_mass_storage && umount /backingfiles || true
+  mkfs.xfs -f -m reflink=1 -L backingfiles /dev/mmcblk0p3
+
+  # update /etc/fstab
+  sed -i 's/LABEL=backingfiles .*/LABEL=backingfiles \/backingfiles xfs auto,rw,noatime 0 2/' /etc/fstab
+  setup_progress "backingfiles converted to xfs and mounted"
+  exit
+fi
+
+if ! hash mkfs.xfs
+then
+  apt-get -y --force-yes install xfsprogs
 fi
 
 BACKINGFILES_MOUNTPOINT="$1"
@@ -36,7 +58,7 @@ ORIGINAL_DISK_IDENTIFIER=$( fdisk -l /dev/mmcblk0 | grep -e "^Disk identifier" |
 
 setup_progress "Modifying partition table for backing files partition..."
 BACKINGFILES_PARTITION_END_SPEC="$(( $LAST_BACKINGFILES_PARTITION_DESIRED_BYTE / 1000000 ))M"
-parted -a optimal -m /dev/mmcblk0 unit B mkpart primary ext4 "$FIRST_BACKINGFILES_PARTITION_BYTE" "$BACKINGFILES_PARTITION_END_SPEC"
+parted -a optimal -m /dev/mmcblk0 unit B mkpart primary xfs "$FIRST_BACKINGFILES_PARTITION_BYTE" "$BACKINGFILES_PARTITION_END_SPEC"
 
 setup_progress "Modifying partition table for mutable (writable) partition for script usage..."
 MUTABLE_PARTITION_START_SPEC="$BACKINGFILES_PARTITION_END_SPEC"
@@ -49,8 +71,9 @@ sed -i "s/${ORIGINAL_DISK_IDENTIFIER}/${NEW_DISK_IDENTIFIER}/g" /etc/fstab
 sed -i "s/${ORIGINAL_DISK_IDENTIFIER}/${NEW_DISK_IDENTIFIER}/" /boot/cmdline.txt
 
 setup_progress "Formatting new partitions..."
-mkfs.ext4 -L backingfiles /dev/mmcblk0p3
+# needs -f option to force recreating over previously existing partition
+mkfs.xfs -f -m reflink=1 -L backingfiles /dev/mmcblk0p3
 mkfs.ext4 -L mutable /dev/mmcblk0p4
 
-echo "LABEL=backingfiles $BACKINGFILES_MOUNTPOINT ext4 auto,rw,noatime 0 2" >> /etc/fstab
+echo "LABEL=backingfiles $BACKINGFILES_MOUNTPOINT xfs auto,rw,noatime 0 2" >> /etc/fstab
 echo "LABEL=mutable $MUTABLE_MOUNTPOINT ext4 auto,rw 0 2" >> /etc/fstab
