@@ -14,7 +14,7 @@ export archiveserver=your_archive_name_or_ip
 export sharename=your_archive_share_name
 export shareuser=username
 export sharepassword=password
-export camsize=100%
+export camsize=16G
 
 # if you set camsize to less than 100%, but don't want music to use
 # all the remaining space, you can specify how much space you want
@@ -34,6 +34,9 @@ export WIFIPASS=your_pass
 
 # If doing a headless (i.e. automatic) setup
 export HEADLESS_SETUP=true
+
+# uncomment to enable a samba server that exports the recordings
+#export SAMBA_ENABLED=true
 
 # uncomment if you want to set the time zone to something other than the default 'BST'
 # Can be an actual timezone, or "auto" to attempt automatic timezone detection
